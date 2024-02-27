@@ -1,7 +1,7 @@
 {
   "name": "reality-v2",
   "version": "2.0.0",
-  "description": "Adapter for Reality.eth questions requesting arbitration to Kleros v2",
+  "description": "Adapter for Reality.eth questions requesting arbitration with Kleros v2",
   "type": "commonjs",
   "main": "index.js",
   "repository": "git@github.com:kleros/reality-v2.git",
