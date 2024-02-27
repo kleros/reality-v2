@@ -1,0 +1,3 @@
+{
+  "extends": ["@kleros/reality-v2-eslint-config"]
+}
