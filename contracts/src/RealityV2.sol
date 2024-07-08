@@ -11,6 +11,7 @@
 pragma solidity 0.8.18;
 
 import {IArbitrableV2, IArbitratorV2} from "@kleros/kleros-v2-contracts/arbitration/interfaces/IArbitrableV2.sol";
+import {EvidenceModule} from "@kleros/kleros-v2-contracts/arbitration/evidence/EvidenceModule.sol";
 import "@kleros/kleros-v2-contracts/arbitration/interfaces/IDisputeTemplateRegistry.sol";
 import "./interfaces/IRealitio.sol";
 import "./interfaces/IRealitioArbitrator.sol";
@@ -21,11 +22,10 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     uint256 public constant REFUSE_TO_ARBITRATE_REALITIO = type(uint256).max; // Constant that represents "Refuse to rule" in realitio format.
 
     IRealitio public immutable override realitio; // Actual implementation of Realitio.
-    IArbitratorV2 public immutable arbitrator; // The Kleros arbitrator.
-    bytes public arbitratorExtraData; // Required for Kleros arbitrator. First 64 bytes contain subcourtID and the second 64 bytes contain number of votes in the jury.
     string public override metadata; // Metadata for Realitio. See IRealitioArbitrator.
 
-    IDisputeTemplateRegistry public immutable templateRegistry; // The dispute template registry.
+    address public governor; // The address that can make changes to the parameters of the contract.
+    IDisputeTemplateRegistry public templateRegistry; // The dispute template registry.
     uint256 public templateId; // Dispute template identifier.
 
     uint256 private constant NUMBER_OF_RULING_OPTIONS = type(uint256).max; // The amount of non 0 choices the arbitrator can give.
@@ -43,33 +43,102 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         address requester; // The address that requested the arbitration.
         uint256 disputeID; // The ID of the dispute raised in the arbitrator contract.
         uint256 ruling; // The ruling given by the arbitrator.
+        uint256 arbitrationParamsIndex; // The index for the arbitration params for the request.
+        // TODO: should template registry be a part of the struct in case it's changed?
+        IDisputeTemplateRegistry templateRegistry; // Address of template registry used for the request.
+    }
+
+    struct ArbitrationParams {
+        IArbitratorV2 arbitrator; // The arbitrator trusted to solve disputes for this request.
+        bytes arbitratorExtraData; // The extra data for the trusted arbitrator of this request.
+        EvidenceModule evidenceModule; // The evidence module for the arbitrator.
     }
 
     mapping(uint256 => ArbitrationRequest) public arbitrationRequests; // Maps a question identifier in uint256 to its arbitration details. Example: arbitrationRequests[uint256(questionID)]
-    mapping(uint256 => uint256) public externalIDtoLocalID; // Maps arbitrator dispute identifiers to local identifiers. We use question ids casted to uint256 as local identifier.
+    mapping(address => mapping(uint256 => uint256)) public arbitratorDisputeIDToQuestionID; // Maps a dispute ID to the ID of the question (converted into uint) with the disputed request in the form arbitratorDisputeIDToQuestionID[arbitrator][disputeID].
+    ArbitrationParams[] public arbitrationParamsChanges;
+
+     modifier onlyGovernor() {
+        if (governor != msg.sender) revert GovernorOnly();
+        _;
+    }
 
     /// @dev Constructor
+    /// @param _governor The trusted governor of this contract.
     /// @param _realitio The address of the Realitio contract.
     /// @param _metadata The metadata required for RealitioArbitrator.
     /// @param _arbitrator The address of the ERC792 arbitrator.
     /// @param _arbitratorExtraData The extra data used to raise a dispute in the ERC792 arbitrator.
+    /// @param _evidenceModule The evidence contract for the arbitrator.
     /// @param _templateRegistry The dispute template registry.
     /// @param _templateData The dispute template data.
     /// @param _templateDataMappings The dispute template data mappings.
     constructor(
+        address _governor,
         IRealitio _realitio,
         string memory _metadata,
         IArbitratorV2 _arbitrator,
         bytes memory _arbitratorExtraData,
+        EvidenceModule _evidenceModule,
         IDisputeTemplateRegistry _templateRegistry,
         string memory _templateData,
         string memory _templateDataMappings
     ) {
+        governor = _governor;
         realitio = _realitio;
         metadata = _metadata;
-        arbitrator = _arbitrator;
-        arbitratorExtraData = _arbitratorExtraData;
         templateRegistry = _templateRegistry;
+        templateId = templateRegistry.setDisputeTemplate("", _templateData, _templateDataMappings);
+        arbitrationParamsChanges.push(
+            ArbitrationParams({
+                arbitrator: _arbitrator,
+                arbitratorExtraData: _arbitratorExtraData,
+                evidenceModule: _evidenceModule
+            })
+        );
+    }
+
+    /// @dev Changes the governor of the Reality proxy.
+    /// @param _governor The address of the new governor.
+    function changeGovernor(address _governor) external onlyGovernor {
+        governor = _governor;
+    }
+
+    /// @notice Changes the params related to arbitration.
+    /// @param _arbitrator Arbitrator to resolve potential disputes. The arbitrator is trusted to support appeal periods and not reenter.
+    /// @param _arbitratorExtraData Extra data for the trusted arbitrator contract.
+    /// @param _evidenceModule The evidence module for the arbitrator.
+    function changeArbitrationParams(
+        IArbitratorV2 _arbitrator,
+        bytes calldata _arbitratorExtraData,
+        EvidenceModule _evidenceModule
+    ) external onlyGovernor {
+        arbitrationParamsChanges.push(
+            ArbitrationParams({
+                arbitrator: _arbitrator,
+                arbitratorExtraData: _arbitratorExtraData,
+                evidenceModule: _evidenceModule
+            })
+        );
+    }
+
+    /// @dev Changes the address of Template Registry contract.
+    /// @param _templateRegistry The new template registry.
+    /// @param _templateData The new template data for template registry.
+    /// @param _templateDataMappings The new data mappings json.
+    function changeTemplateRegistry(
+        IDisputeTemplateRegistry _templateRegistry,
+        string memory _templateData,
+        string memory _templateDataMappings)
+     external onlyGovernor {
+        templateRegistry = _templateRegistry;
+        templateId = templateRegistry.setDisputeTemplate("", _templateData, _templateDataMappings);
+    }
+
+    /// @dev Changes the dispute template.
+    /// @param _templateData The new template data for requests.
+    /// @param _templateDataMappings The new data mappings json.
+    function changeDisputeTemplate(string memory _templateData, string memory _templateDataMappings) external onlyGovernor {
         templateId = templateRegistry.setDisputeTemplate("", _templateData, _templateDataMappings);
     }
 
@@ -80,16 +149,21 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     function requestArbitration(bytes32 _questionID, uint256 _maxPrevious) external payable returns (uint256 disputeID) {
         ArbitrationRequest storage arbitrationRequest = arbitrationRequests[uint256(_questionID)];
         if(arbitrationRequest.status != Status.None) revert ArbitrationAlreadyRequested();
+        uint256 arbitrationParamsIndex = arbitrationParamsChanges.length - 1;
+        IArbitratorV2 arbitrator = arbitrationParamsChanges[arbitrationParamsIndex].arbitrator;
+        bytes storage arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
 
         // Notify Kleros
         disputeID = arbitrator.createDispute{value: msg.value}(NUMBER_OF_RULING_OPTIONS, arbitratorExtraData); /* If msg.value is greater than intended number of votes (specified in arbitratorExtraData),
         Kleros will automatically spend excess for additional votes. */
-        externalIDtoLocalID[disputeID] = uint256(_questionID);
+        arbitratorDisputeIDToQuestionID[address(arbitrator)][disputeID] = uint256(_questionID);
 
         // Update internal state
         arbitrationRequest.requester = msg.sender;
         arbitrationRequest.status = Status.Disputed;
         arbitrationRequest.disputeID = disputeID;
+        arbitrationRequest.arbitrationParamsIndex = arbitrationParamsIndex;
+        arbitrationRequest.templateRegistry = templateRegistry;
 
         // Notify Realitio
         realitio.notifyOfArbitrationRequest(_questionID, msg.sender, _maxPrevious);
@@ -100,11 +174,11 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     /// @param _disputeID ID of Kleros dispute.
     /// @param _ruling Ruling that is given by Kleros. This needs to be converted to Realitio answer before reporting the answer by shifting by 1.
     function rule(uint256 _disputeID, uint256 _ruling) public override {
-        if(IArbitratorV2(msg.sender) != arbitrator) revert ArbitratorOnly();
-
-        uint256 questionID = externalIDtoLocalID[_disputeID];
+        uint256 questionID = arbitratorDisputeIDToQuestionID[msg.sender][_disputeID];
         ArbitrationRequest storage arbitrationRequest = arbitrationRequests[questionID];
-
+        IArbitratorV2 arbitrator = arbitrationParamsChanges[arbitrationRequest.arbitrationParamsIndex].arbitrator;
+        
+        if(IArbitratorV2(msg.sender) != arbitrator) revert ArbitratorOnly();
         if(arbitrationRequest.status != Status.Disputed) revert StatusNotDisputed();
 
         arbitrationRequest.ruling = _ruling;
@@ -139,6 +213,9 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     /// @dev Returns arbitration fee by calling arbitrationCost function in the arbitrator contract.
     /// @return fee Arbitration fee that needs to be paid.
     function getDisputeFee(bytes32) external view override returns (uint256 fee) {
+        uint256 arbitrationParamsIndex = arbitrationParamsChanges.length - 1;
+        IArbitratorV2 arbitrator = arbitrationParamsChanges[arbitrationParamsIndex].arbitrator;
+        bytes storage arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
         return arbitrator.arbitrationCost(arbitratorExtraData);
     }
 
@@ -146,4 +223,5 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     error StatusNotRuled();
     error ArbitrationAlreadyRequested();
     error ArbitratorOnly();
+    error GovernorOnly();
 }
