@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 /**
- *  @authors: [@unknownunknown1]
+ *  @authors: [@unknownunknown1, @jaybuidl]
  *  @reviewers: []
  *  @auditors: []
  *  @bounties: []
@@ -12,23 +12,16 @@ pragma solidity 0.8.18;
 
 import {IArbitrableV2, IArbitratorV2} from "@kleros/kleros-v2-contracts/arbitration/interfaces/IArbitrableV2.sol";
 import {EvidenceModule} from "@kleros/kleros-v2-contracts/arbitration/evidence/EvidenceModule.sol";
-import "@kleros/kleros-v2-contracts/arbitration/interfaces/IDisputeTemplateRegistry.sol";
-import "./interfaces/IRealitio.sol";
-import "./interfaces/IRealitioArbitrator.sol";
+import {IDisputeTemplateRegistry} from "@kleros/kleros-v2-contracts/arbitration/interfaces/IDisputeTemplateRegistry.sol";
+import {IRealitio} from "./interfaces/IRealitio.sol";
+import {IRealitioArbitrator} from "./interfaces/IRealitioArbitrator.sol";
 
 /// @title RealitioProxyV2
 /// @dev Realitio proxy contract compatible with V2.
 contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
-    uint256 public constant REFUSE_TO_ARBITRATE_REALITIO = type(uint256).max; // Constant that represents "Refuse to rule" in realitio format.
-
-    IRealitio public immutable override realitio; // Actual implementation of Realitio.
-    string public override metadata; // Metadata for Realitio. See IRealitioArbitrator.
-
-    address public governor; // The address that can make changes to the parameters of the contract.
-    IDisputeTemplateRegistry public templateRegistry; // The dispute template registry.
-    uint256 public templateId; // Dispute template identifier.
-
-    uint256 private constant NUMBER_OF_RULING_OPTIONS = type(uint256).max; // The amount of non 0 choices the arbitrator can give.
+    // ************************************* //
+    // *         Enums / Structs           * //
+    // ************************************* //
 
     enum Status {
         None, // The question hasn't been requested arbitration yet.
@@ -54,14 +47,33 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         EvidenceModule evidenceModule; // The evidence module for the arbitrator.
     }
 
+    // ************************************* //
+    // *             Storage               * //
+    // ************************************* //
+
+    uint256 private constant NUMBER_OF_RULING_OPTIONS = type(uint256).max; // Maximum, the number of choices in a Realitio question is unknown
+    
+    IRealitio public immutable override realitio; // Actual implementation of Realitio.
+    string public override metadata; // Metadata for Realitio. See IRealitioArbitrator.
+    address public governor; // The address that can make changes to the parameters of the contract.
+    IDisputeTemplateRegistry public templateRegistry; // The dispute template registry.
+    uint256 public templateId; // Dispute template identifier.
     mapping(uint256 => ArbitrationRequest) public arbitrationRequests; // Maps a question identifier in uint256 to its arbitration details. Example: arbitrationRequests[uint256(questionID)]
     mapping(address => mapping(uint256 => uint256)) public arbitratorDisputeIDToQuestionID; // Maps a dispute ID to the ID of the question (converted into uint) with the disputed request in the form arbitratorDisputeIDToQuestionID[arbitrator][disputeID].
     ArbitrationParams[] public arbitrationParamsChanges;
 
-     modifier onlyGovernor() {
+    // ************************************* //
+    // *        Function Modifiers         * //
+    // ************************************* //
+
+    modifier onlyGovernor() {
         if (governor != msg.sender) revert GovernorOnly();
         _;
     }
+
+    // ************************************* //
+    // *            Constructor            * //
+    // ************************************* //
 
     /// @dev Constructor
     /// @param _governor The trusted governor of this contract.
@@ -98,6 +110,10 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         );
     }
 
+    // ************************************* //
+    // *             Governance            * //
+    // ************************************* //
+
     /// @dev Changes the governor of the Reality proxy.
     /// @param _governor The address of the new governor.
     function changeGovernor(address _governor) external onlyGovernor {
@@ -129,8 +145,8 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     function changeTemplateRegistry(
         IDisputeTemplateRegistry _templateRegistry,
         string memory _templateData,
-        string memory _templateDataMappings)
-     external onlyGovernor {
+        string memory _templateDataMappings
+    ) external onlyGovernor {
         templateRegistry = _templateRegistry;
         templateId = templateRegistry.setDisputeTemplate("", _templateData, _templateDataMappings);
     }
@@ -138,23 +154,36 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     /// @dev Changes the dispute template.
     /// @param _templateData The new template data for requests.
     /// @param _templateDataMappings The new data mappings json.
-    function changeDisputeTemplate(string memory _templateData, string memory _templateDataMappings) external onlyGovernor {
+    function changeDisputeTemplate(
+        string memory _templateData,
+        string memory _templateDataMappings
+    ) external onlyGovernor {
         templateId = templateRegistry.setDisputeTemplate("", _templateData, _templateDataMappings);
     }
+
+    // ************************************* //
+    // *         State Modifiers           * //
+    // ************************************* //
 
     /// @dev Request arbitration from Kleros for given _questionID.
     /// @param _questionID The question identifier in Realitio contract.
     /// @param _maxPrevious If specified, reverts if a bond higher than this was submitted after you sent your transaction.
     /// @return disputeID ID of the resulting dispute in arbitrator.
-    function requestArbitration(bytes32 _questionID, uint256 _maxPrevious) external payable returns (uint256 disputeID) {
+    function requestArbitration(
+        bytes32 _questionID,
+        uint256 _maxPrevious
+    ) external payable returns (uint256 disputeID) {
         ArbitrationRequest storage arbitrationRequest = arbitrationRequests[uint256(_questionID)];
-        if(arbitrationRequest.status != Status.None) revert ArbitrationAlreadyRequested();
+        if (arbitrationRequest.status != Status.None) revert ArbitrationAlreadyRequested();
         uint256 arbitrationParamsIndex = arbitrationParamsChanges.length - 1;
         IArbitratorV2 arbitrator = arbitrationParamsChanges[arbitrationParamsIndex].arbitrator;
         bytes storage arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
 
         // Notify Kleros
-        disputeID = arbitrator.createDispute{value: msg.value}(NUMBER_OF_RULING_OPTIONS, arbitratorExtraData); /* If msg.value is greater than intended number of votes (specified in arbitratorExtraData),
+        disputeID = arbitrator.createDispute{value: msg.value}(
+            NUMBER_OF_RULING_OPTIONS,
+            arbitratorExtraData
+        ); /* If msg.value is greater than intended number of votes (specified in arbitratorExtraData),
         Kleros will automatically spend excess for additional votes. */
         arbitratorDisputeIDToQuestionID[address(arbitrator)][disputeID] = uint256(_questionID);
 
@@ -177,9 +206,9 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         uint256 questionID = arbitratorDisputeIDToQuestionID[msg.sender][_disputeID];
         ArbitrationRequest storage arbitrationRequest = arbitrationRequests[questionID];
         IArbitratorV2 arbitrator = arbitrationParamsChanges[arbitrationRequest.arbitrationParamsIndex].arbitrator;
-        
-        if(IArbitratorV2(msg.sender) != arbitrator) revert ArbitratorOnly();
-        if(arbitrationRequest.status != Status.Disputed) revert StatusNotDisputed();
+
+        if (IArbitratorV2(msg.sender) != arbitrator) revert ArbitratorOnly();
+        if (arbitrationRequest.status != Status.Disputed) revert StatusNotDisputed();
 
         arbitrationRequest.ruling = _ruling;
         arbitrationRequest.status = Status.Ruled;
@@ -201,14 +230,23 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         address _lastAnswerer
     ) external {
         ArbitrationRequest storage arbitrationRequest = arbitrationRequests[uint256(_questionID)];
-        if(arbitrationRequest.status != Status.Ruled) revert StatusNotRuled();
+        if (arbitrationRequest.status != Status.Ruled) revert StatusNotRuled();
 
         arbitrationRequest.status = Status.Reported;
-        // Realitio ruling is shifted by 1 compared to Kleros.
-        uint256 realitioRuling = arbitrationRequest.ruling != 0 ? arbitrationRequest.ruling - 1 : REFUSE_TO_ARBITRATE_REALITIO;
-
-        realitio.assignWinnerAndSubmitAnswerByArbitrator(_questionID, bytes32(realitioRuling), arbitrationRequest.requester, _lastHistoryHash, _lastAnswerOrCommitmentID, _lastAnswerer);
+        uint256 realitioRuling = _klerosToRealitioRuling(arbitrationRequest.ruling);
+        realitio.assignWinnerAndSubmitAnswerByArbitrator(
+            _questionID,
+            bytes32(realitioRuling),
+            arbitrationRequest.requester,
+            _lastHistoryHash,
+            _lastAnswerOrCommitmentID,
+            _lastAnswerer
+        );
     }
+
+    // ************************************* //
+    // *           Public Views            * //
+    // ************************************* //
 
     /// @dev Returns arbitration fee by calling arbitrationCost function in the arbitrator contract.
     /// @return fee Arbitration fee that needs to be paid.
@@ -218,6 +256,23 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         bytes storage arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
         return arbitrator.arbitrationCost(arbitratorExtraData);
     }
+
+    // ************************************* //
+    // *            Internal               * //
+    // ************************************* //
+
+    /// @dev Converts Kleros ruling to Realitio ruling.
+    /// @param _klerosRuling The ruling from Kleros.
+    /// @return The ruling in Realitio format.
+    function _klerosToRealitioRuling(uint256 _klerosRuling) internal pure returns (uint256) {
+        if (_klerosRuling == 0) return type(uint256).max; // Refuse to arbitrate
+        if (_klerosRuling == 1) return type(uint256).max - 1; // Answered Too Soon
+        return _klerosRuling - 1; // Normal answers are shifted by 1
+    }
+
+    // ************************************* //
+    // *              Errors               * //
+    // ************************************* //
 
     error StatusNotDisputed();
     error StatusNotRuled();
