@@ -50,14 +50,15 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     // ************************************* //
 
     uint256 private constant NUMBER_OF_RULING_OPTIONS = type(uint256).max; // Maximum, the number of choices in a Realitio question is unknown
-    
+
     IRealitio public immutable override realitio; // Actual implementation of Realitio.
     string public override metadata; // Metadata for Realitio. See IRealitioArbitrator.
     address public governor; // The address that can make changes to the parameters of the contract.
     IDisputeTemplateRegistry public templateRegistry; // The dispute template registry.
     uint256 public templateId; // Dispute template identifier.
     mapping(uint256 questionID => ArbitrationRequest) public arbitrationRequests; // Maps a question identifier in uint256 to its arbitration details. Example: arbitrationRequests[uint256(questionID)]
-    mapping(address arbitrator => mapping(uint256 disputeID => uint256 questionID)) public arbitratorDisputeIDToQuestionID; // Maps a dispute ID to the ID of the question (converted into uint) with the disputed request in the form arbitratorDisputeIDToQuestionID[arbitrator][disputeID].
+    mapping(address arbitrator => mapping(uint256 disputeID => uint256 questionID))
+        public arbitratorDisputeIDToQuestionID; // Maps a dispute ID to the ID of the question (converted into uint) with the disputed request in the form arbitratorDisputeIDToQuestionID[arbitrator][disputeID].
     ArbitrationParams[] public arbitrationParamsChanges;
 
     // ************************************* //
@@ -178,11 +179,8 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         bytes storage arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
 
         // Notify Kleros
-        disputeID = arbitrator.createDispute{value: msg.value}(
-            NUMBER_OF_RULING_OPTIONS,
-            arbitratorExtraData
-        ); /* If msg.value is greater than intended number of votes (specified in arbitratorExtraData),
-        Kleros will automatically spend excess for additional votes. */
+        // If msg.value is greater than intended number of votes (specified in arbitratorExtraData), Kleros will automatically spend excess for additional votes.
+        disputeID = arbitrator.createDispute{value: msg.value}(NUMBER_OF_RULING_OPTIONS, arbitratorExtraData);
         arbitratorDisputeIDToQuestionID[address(arbitrator)][disputeID] = uint256(_questionID);
 
         // Update internal state
@@ -262,7 +260,7 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     /// @param _klerosRuling The ruling from Kleros.
     /// @return The ruling in Realitio format.
     function _klerosToRealitioRuling(uint256 _klerosRuling) internal pure returns (uint256) {
-        if (_klerosRuling == 0) return type(uint256).max; // Refuse to arbitrate
+        if (_klerosRuling == 0) return type(uint256).max; // Refuse to arbitrate / Invalid
         if (_klerosRuling == 1) return type(uint256).max - 1; // Answered Too Soon
         return _klerosRuling - 1; // Normal answers are shifted by 1
     }
