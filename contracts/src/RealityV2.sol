@@ -37,8 +37,6 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         uint256 disputeID; // The ID of the dispute raised in the arbitrator contract.
         uint256 ruling; // The ruling given by the arbitrator.
         uint256 arbitrationParamsIndex; // The index for the arbitration params for the request.
-        // TODO: should template registry be a part of the struct in case it's changed?
-        IDisputeTemplateRegistry templateRegistry; // Address of template registry used for the request.
     }
 
     struct ArbitrationParams {
@@ -192,7 +190,6 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         arbitrationRequest.status = Status.Disputed;
         arbitrationRequest.disputeID = disputeID;
         arbitrationRequest.arbitrationParamsIndex = arbitrationParamsIndex;
-        arbitrationRequest.templateRegistry = templateRegistry;
 
         // Notify Realitio
         realitio.notifyOfArbitrationRequest(_questionID, msg.sender, _maxPrevious);
