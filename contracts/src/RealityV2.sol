@@ -8,7 +8,7 @@
  *  @deployments: []
  */
 
-pragma solidity 0.8.18;
+pragma solidity 0.8.24;
 
 import {IArbitrableV2, IArbitratorV2} from "@kleros/kleros-v2-contracts/arbitration/interfaces/IArbitrableV2.sol";
 import {EvidenceModule} from "@kleros/kleros-v2-contracts/arbitration/evidence/EvidenceModule.sol";
@@ -58,8 +58,8 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     address public governor; // The address that can make changes to the parameters of the contract.
     IDisputeTemplateRegistry public templateRegistry; // The dispute template registry.
     uint256 public templateId; // Dispute template identifier.
-    mapping(uint256 => ArbitrationRequest) public arbitrationRequests; // Maps a question identifier in uint256 to its arbitration details. Example: arbitrationRequests[uint256(questionID)]
-    mapping(address => mapping(uint256 => uint256)) public arbitratorDisputeIDToQuestionID; // Maps a dispute ID to the ID of the question (converted into uint) with the disputed request in the form arbitratorDisputeIDToQuestionID[arbitrator][disputeID].
+    mapping(uint256 questionID => ArbitrationRequest) public arbitrationRequests; // Maps a question identifier in uint256 to its arbitration details. Example: arbitrationRequests[uint256(questionID)]
+    mapping(address arbitrator => mapping(uint256 disputeID => uint256 questionID)) public arbitratorDisputeIDToQuestionID; // Maps a dispute ID to the ID of the question (converted into uint) with the disputed request in the form arbitratorDisputeIDToQuestionID[arbitrator][disputeID].
     ArbitrationParams[] public arbitrationParamsChanges;
 
     // ************************************* //
