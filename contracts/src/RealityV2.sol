@@ -176,7 +176,7 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
         if (arbitrationRequest.status != Status.None) revert ArbitrationAlreadyRequested();
         uint256 arbitrationParamsIndex = arbitrationParamsChanges.length - 1;
         IArbitratorV2 arbitrator = arbitrationParamsChanges[arbitrationParamsIndex].arbitrator;
-        bytes storage arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
+        bytes memory arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
 
         // Notify Kleros
         // If msg.value is greater than intended number of votes (specified in arbitratorExtraData), Kleros will automatically spend excess for additional votes.
@@ -248,7 +248,7 @@ contract RealitioProxyV2 is IRealitioArbitrator, IArbitrableV2 {
     function getDisputeFee(bytes32) external view override returns (uint256 fee) {
         uint256 arbitrationParamsIndex = arbitrationParamsChanges.length - 1;
         IArbitratorV2 arbitrator = arbitrationParamsChanges[arbitrationParamsIndex].arbitrator;
-        bytes storage arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
+        bytes memory arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
         return arbitrator.arbitrationCost(arbitratorExtraData);
     }
 
